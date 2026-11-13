@@ -1,0 +1,9 @@
+.claude/
+__pycache__/
+~$*
+*.scrub
+*.bak
+# vendor data never goes in the repo: Citi snapshots, price history and workbooks built from Citi data
+data/gold_ra_citi_*.csv
+data/gold_spot_history_*.csv
+gold_range_accrual_2*.xlsx
