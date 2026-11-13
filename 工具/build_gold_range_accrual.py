@@ -15,8 +15,9 @@ risk-neutral distribution block.
 Needs: Excel with the Citi Velocity add-in and a logged-in Velocity session (else --offline uses the newest snapshot
 in ../data). Leaves the workbook open in Excel.
 
---share builds a copy for people outside: market inputs only from --snapshot, no Citi formula, no price history, and
-author / save-path metadata removed from the file (the workbook is closed after the scrub).
+--share builds a copy for people outside: market inputs only from --snapshot, no Citi formula, price history from
+../data/gold_spot_history_*.csv when present (else the 历史 sheet stays empty), and author / save-path metadata removed
+from the file (the workbook is closed after the scrub).
 
 Usage: uv run <this file> [--date YYYY-MM-DD (default: last London 16:00 close)] [--days 92] [--c 0.05]
                           [--lo X --hi Y] [--spread bp --issue 1.0 --fee 0 --target 0.01] [--out <path.xlsx>]
@@ -695,8 +696,8 @@ def build_history_none(s):
     labels = ['完整窗口数', '每个窗口的定盘次数 n', '区间（相对当天现价）', '平均计息比例', '全部计息的窗口占比', '零计息的窗口占比',
               '计息比例 10% 分位', '计息比例中位数', '计息比例 90% 分位', '平均年化票息']
     rows = [['项目', '数值', '说明'],
-            ['数据', '未包含', '分享版不含历史行情。有 Citi Velocity 时不加 --share 重建；或在 data/ 放 '
-                             'gold_spot_history_<YYYYMMDD>.csv（列 date, close），用 --offline 重建']]
+            ['数据', '未包含', '建表时 data/ 里没有 gold_spot_history_<YYYYMMDD>.csv（列 date, close）。放进去后重建，'
+                             '或有 Citi Velocity 时不加 --share 重建']]
     rows += [[lab, '—', ''] for lab in labels]
     s.put(4, 1, rows)
     s.header('A4:C4')
@@ -925,7 +926,7 @@ def build_notes(s):
         '这是“那天新发一张同样条款的票据”的价格；固定边界离当时现价太远时，可把区间模式切到“按现价平移”。',
         '重建工作簿：uv run 工具/build_gold_range_accrual.py --replace'
         '（默认定价日为最近一个 London 16:00 收盘日，区间为现价 ±6% 取整到 50 美元，票息 5%）。需 Excel 已登录 Velocity，否则加 --offline 用快照；'
-        '--share --snapshot <csv> 生成不含 Citi 公式、历史数据和作者信息的分享版。',
+        '--share --snapshot <csv> 生成不含 Citi 公式和作者信息的分享版（历史表用 data/ 里的历史 CSV，没有就留空）。',
     ]
     s.put(3, 1, [[x] for x in lines])
     s.widths({'A': 150})
@@ -1107,7 +1108,8 @@ def main():
     ap.add_argument('--snapshot', help='snapshot CSV (tag,value,data_date) to use when Citi is unavailable')
     ap.add_argument('--source', default='自动', choices=SOURCES)
     ap.add_argument('--share', action='store_true',
-                    help='copy for sharing: inputs only from --snapshot, no Citi formula, no history, metadata scrubbed')
+                    help='copy for sharing: inputs only from --snapshot, no Citi formula, history only from a csv in '
+                         'data/, metadata scrubbed')
     ap.add_argument('--replace', action='store_true', help='close the existing output if open and send it to the Recycle Bin')
     a = ap.parse_args()
     if a.share:
@@ -1270,16 +1272,17 @@ def build(app, wb, a, out, date, addin_path):
             save_history(hist, date)
         else:
             print('history pull failed:', why)
-    if a.share:
-        build_history_none(sh['历史'])
-    else:
-        if not hist:
-            hist, hp = load_history(date)
-            if not hist:
-                fail('auth', 'log in to Citi Velocity, or keep a gold_spot_history_*.csv in data/', 'no gold history available')
+    if not hist:
+        hist, hp = load_history(date)
+        if hist:
             print('history from', hp.name)
+    if hist:
         wb.Worksheets('历史').Activate()
         build_history_data(sh['历史'], hist)
+    elif a.share:
+        build_history_none(sh['历史'])
+    else:
+        fail('auth', 'log in to Citi Velocity, or keep a gold_spot_history_*.csv in data/', 'no gold history available')
     app.CalculateFull()
 
     # independent model check
@@ -1343,11 +1346,11 @@ def build(app, wb, a, out, date, addin_path):
                 f"cpn_q10/50/90={qq[0.1]:.2%}/{qq[0.5]:.2%}/{qq[0.9]:.2%}")
     print('layer4_max_abs_diff', [p(gv('第4层', f'{l4(bi, "diff")}4'), '.1e') for bi in range(len(BOUNDS))])
     print('overview_checks', [p(x[0], '.1e') for x in gv('总览', f'F{chk}:F{chk + 1}')])
-    if hist and not a.share:
+    if hist:
         print('history', f'{hist[0][0]}..{hist[-1][0]} rows={len(hist)}', 'mean_frac', p(gv('历史', 'B9'), '.2%'),
               'full', p(gv('历史', 'B10'), '.2%'), 'zero', p(gv('历史', 'B11'), '.2%'), 'mean_cpn', p(gv('历史', 'B15'), '.3%'))
     else:
-        print('history', 'not included (--share)')
+        print('history', 'not included (--share, no history csv in data/)')
     print('sens', [(round(gv('敏感性', f'A{SENS0 + j}'), 3), p(gv('敏感性', f'I{SENS0 + j}'), '.2%'),
                     p(gv('敏感性', f'J{SENS0 + j}'), '.2%')) for j in range(len(WIDTHS))])
     print('status', status, '|', gv('总览', 'A4'))
